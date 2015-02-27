@@ -66,6 +66,7 @@ unsigned long SecSleep=0;
 unsigned int PageMax=400;
 unsigned int MinPage=0;
 unsigned int MaxPage=UINT_MAX;
+uint8_t AddTime=0;
 char *cookie=NULL;
 int GalleryNum=0;
 int NumGallery;
@@ -229,6 +230,7 @@ void GetTitleNumPage(char *S,char **Title,unsigned int *NumPage)
 	//sNumPage=GetLink(S,"Images:</td><td class=\"gdt2\">"," @ ",NULL);
 	GetLink(S,"Images:</td><td class=\"gdt2\">"," @ ",NULL,&sNumPage);
 	*NumPage=atoi(sNumPage);
+	free(sNumPage);
 
 }
 
@@ -534,7 +536,10 @@ int StartImg(int NumPage,char ** P, char **H,char*LinkPage,CURL * curl,struct Me
 char * GetLinkNextPage(char * S)
 {
 	char * ret;
-	GetLinkReverse(S,"\" href=\"","\"><img src=\"http://st.exhentai.net/img/n.png\"",NULL,&ret);
+	//printf("SSSS %s\n",S );
+/**OLD**/	//GetLinkReverse(S,"\" href=\"","\"><img src=\"http://st.exhentai.net/img/n.png\"",NULL,&ret);
+	GetLinkReverse(S,"\" href=\"","\"><img src=\"http://exhentai.org/img/n.png\"",NULL,&ret);
+	//printf("ret %s\n",ret );
 	return ret;
 }
 
@@ -558,6 +563,7 @@ char *GetNextPage(unsigned int *i,char * End,int NumPage,char * LinkPage,CURL * 
 		if (h==INVALID_HANDLE_VALUE ){
 			//printf("find for %d/%d\n",j,NumPage );
 			//(*i)=j
+			//printf("gggg\n");
 			if(j==(*i)+1){
 				(*i)++;
 				return GetLinkNextPage(End);
@@ -685,6 +691,7 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 	//wchar_t *WNameImg;
 	wchar_t WNameImg[256];
 	char *Title,*End;
+	char *TTitle;
 	wchar_t *WTitle;
 	wchar_t *Ext;
 	CURL *CurlGal;
@@ -695,6 +702,7 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 	struct Mem Page;
 	unsigned int NumPage,i;
 	int Cont;
+	char * Time;
 	/*
 	struct __WriteImg WImgData;
 	*/
@@ -715,12 +723,30 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 	curl_easy_setopt(CurlGal, CURLOPT_WRITEFUNCTION ,&WriteImg);
 	//Page.mem=(char*)malloc(1);
 	Page.mem=NULL;
-	GetTitleNumPage((*HP).mem,&Title,&NumPage);
+	GetTitleNumPage((*HP).mem,&TTitle,&NumPage);
+	//GetLink((*HP).mem,"Posted:</td><td class=\"gdt2\">","</td>",NULL,&Time);
+	GetLink((*HP).mem,"Posted:</td><td class=\"gdt2\">"," ",NULL,&Time);
+	//printf("TIme %s\n",Time );
+	ReplaceAll(Time,':','-');
+	//printf("Time %s\n",Time );
+
 //printf("%s\n",HP.mem );
-	if (Title==NULL || NumPage == 0){
+	if (TTitle==NULL || NumPage == 0 ||Time==NULL){
 		printf("Error GetTitleNumPage\n");
 		printf("%s\n",(*HP).mem );
 		return ;
+	}
+	if (AddTime){
+		Title=malloc(sizeof(char)*(strlen(TTitle)+strlen(Time)+2));
+		memset(Title,0,sizeof(char)*(strlen(TTitle)+strlen(Time)+2));
+		strcat (Title,Time);
+		strcat (Title," ");
+		strcat (Title,TTitle);
+		free(TTitle);
+		free(Time);
+	} else {
+		Title=TTitle;
+		free(Time);
 	}
 	printf("start thread %d\n",ThreadNum );
 	_WaitForSingleObject(MutexNumGallery);
@@ -833,6 +859,8 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 			if(res != CURLE_OK){
 				fprintf(stderr, "thread %d curl_easy_perform() 2 failed: %s\n",
 					    ThreadNum,curl_easy_strerror(res));
+				fprintf(stderr, "Link %s\n",
+					   	P);
 				Cont++;
 				if (Cont>MaxTry){
 					//SetCurrentDirectory("..");
@@ -849,6 +877,7 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 			printf("Error GetLink LinkImg\n");
 			goto cont3;
 		}
+		//printf("Link Img: %s\n",LinkIm );
 		LinkImg=ConvertLink(LinkImg);
 		if (LinkImg==NULL){
 			printf("Error ConvertLink");
@@ -1344,6 +1373,7 @@ int main (int argc,char **argv)
 	char *Search=NULL;
 	char *Pname;
 	char *sk=NULL;
+	//uint8_t AddTime=0;
 	//char *Tag="1100000000";
 	char *Tag="1111111111";
 	int *Rec=NULL;
@@ -1391,7 +1421,8 @@ int main (int argc,char **argv)
 		{"exclude",required_argument,NULL,'x'},
 		{"max-page",required_argument,NULL,'N'},
 		{"list",no_argument,NULL,'L'},
-		{"time-out",required_argument,NULL,'O'}
+		{"time-out",required_argument,NULL,'O'},
+		{"add-time",no_argument,NULL,'A'}
 
 	};
 	Cargc=argc;
@@ -1482,10 +1513,13 @@ int main (int argc,char **argv)
 	//while((opt = getopt(argc,argv,"c:m:p::l:f:d:"))!=-1){
 	//printf("ciao %d \n", Cargc);
 	while ((opt=getopt_long(Cargc,Cargv,
-		               "c:m:p::l:f:d:s:n:hr::k:a:t:P::T:voqx:N:LO:",
+		               "c:m:p::l:f:d:s:n:hr::k:a:t:P::T:voqx:N:LO:A",
 		               long_opt,&optindex))!=-1){
 	//	printf("%c\n",opt );
 		switch(opt) {
+		case 'A':
+			AddTime=1;
+			break;
 		case 'L':
 			List=1;
 			break;
