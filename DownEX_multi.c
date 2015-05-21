@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <wchar.h>
 #include <math.h>
+#include <stdlib.h>
 
 
 struct Mem {
@@ -66,7 +67,9 @@ unsigned long SecSleep=0;
 unsigned int PageMax=400;
 unsigned int MinPage=0;
 unsigned int MaxPage=UINT_MAX;
+uint8_t BestQuality=0;
 uint8_t AddTime=0;
+uint8_t AddNumPage=0;
 char *cookie=NULL;
 int GalleryNum=0;
 int NumGallery;
@@ -104,6 +107,7 @@ size_t WriteMem ( char *ptr, size_t size, size_t nmemb, void *userdata)
 		exit(1);
 	}
 	memcpy(P->mem+P->size,ptr,RealSize);
+	//printf("%X%X%X%X\n",ptr[0],ptr[1],ptr[2],ptr[3]);
 	P->size=P->size+RealSize;
 	return RealSize;
 }
@@ -223,15 +227,17 @@ uint8_t GetLink( char * S,  char * F, char * L, char **end,char **Link)
 
 
 void GetTitleNumPage(char *S,char **Title,unsigned int *NumPage)
+//char * GetTitleNumPage(char *S,char **Title,unsigned int *NumPage)
 {
 	char * sNumPage;
 	//*Title=GetLink(S,"<title>"," - ExHentai.org",NULL);
 	GetLink(S,"<title>"," - ExHentai.org",NULL,Title);
 	//sNumPage=GetLink(S,"Images:</td><td class=\"gdt2\">"," @ ",NULL);
-	GetLink(S,"Images:</td><td class=\"gdt2\">"," @ ",NULL,&sNumPage);
+	//GetLink(S,"Images:</td><td class=\"gdt2\">"," @ ",NULL,&sNumPage);
+	GetLink(S,"Length:</td><td class=\"gdt2\">"," pages",NULL,&sNumPage);
 	*NumPage=atoi(sNumPage);
 	free(sNumPage);
-
+	//return sNumPage;
 }
 
 
@@ -467,7 +473,25 @@ wchar_t* fromUTF8toUTF16 (char * U8)
 	return	U16;
 }
 
+char *FindFormat(struct Mem ImgData){
+	//char * ret;
 
+	//ret=malloc(sizeof(char)*5);
+	if((ImgData.mem[0]&0xFF)==0xFF && (ImgData.mem[1]&0xFF)==0xD8 && (ImgData.mem[2]&0xFF)==0xFF){
+		return ".jpg";
+	}
+	 //	89 50 4e 47 0d 0a 1a 0a
+	if((ImgData.mem[0]&0xFF)==0x89 && (ImgData.mem[1]&0xFF)==0x50 && (ImgData.mem[2]&0xFF)==0x4E &&
+	   (ImgData.mem[3]&0xFF)==0x47 && (ImgData.mem[4]&0xFF)==0x0D && (ImgData.mem[5]&0xFF)==0x0A &&
+	   (ImgData.mem[6]&0xFF)==0x1A && (ImgData.mem[7]&0xFF)==0x0A ){
+	   	return ".png";
+	}
+	if((ImgData.mem[0]&0xFF)==0x47 && (ImgData.mem[1]&0xFF)==0x49 && (ImgData.mem[2]&0xFF)==0x46 &&
+	   (ImgData.mem[3]&0xFF)==0x38 && (ImgData.mem[5]&0xFF)==0x61 ){
+		return ".gif";
+	}
+	return ".nul";
+}
 
 static inline int __attribute__((always_inline)) num_digit(int N)  
 {
@@ -691,7 +715,7 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 	//wchar_t *WNameImg;
 	wchar_t WNameImg[256];
 	char *Title,*End;
-	char *TTitle;
+	char *TTitle,sNumPage[5];
 	wchar_t *WTitle;
 	wchar_t *Ext;
 	CURL *CurlGal;
@@ -703,6 +727,11 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 	unsigned int NumPage,i;
 	int Cont;
 	char * Time;
+
+	struct Mem ImgData;
+
+	ImgData.mem=malloc(1);
+	ImgData.size=0;
 	/*
 	struct __WriteImg WImgData;
 	*/
@@ -717,10 +746,16 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 	End=NULL;
 	memset(Tag,0,sizeof(Tag));
 	//printf("%d %d \n",sizeof(Tag),sizeof(struct _Tag)*10 );
+
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA , &Page);
+	curl_easy_setopt(CurlGal, CURLOPT_WRITEDATA , &(ImgData));
+	curl_easy_setopt(CurlGal, CURLOPT_COOKIEFILE,cookie);
+	curl_easy_setopt(CurlGal, CURLOPT_FOLLOWLOCATION,1L);
 
-
+	/**
 	curl_easy_setopt(CurlGal, CURLOPT_WRITEFUNCTION ,&WriteImg);
+	*/
+	curl_easy_setopt(CurlGal, CURLOPT_WRITEFUNCTION ,&WriteMem);
 	//Page.mem=(char*)malloc(1);
 	Page.mem=NULL;
 	GetTitleNumPage((*HP).mem,&TTitle,&NumPage);
@@ -736,18 +771,29 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 		printf("%s\n",(*HP).mem );
 		return ;
 	}
-	if (AddTime){
-		Title=malloc(sizeof(char)*(strlen(TTitle)+strlen(Time)+2));
-		memset(Title,0,sizeof(char)*(strlen(TTitle)+strlen(Time)+2));
-		strcat (Title,Time);
-		strcat (Title," ");
-		strcat (Title,TTitle);
-		free(TTitle);
-		free(Time);
-	} else {
-		Title=TTitle;
-		free(Time);
+	sprintf(sNumPage,"%04u",NumPage );
+	Title=malloc(sizeof(char)*(strlen(TTitle)+20));
+	if (Title==NULL){
+		perror("Malloc");/**"[2014-00-11][0000] "**/
+		return ;
 	}
+	memset(Title,0,sizeof(char)*(strlen(TTitle)+20));
+	if (AddTime){
+		strcat (Title,"[");
+		strcat (Title,Time);
+		strcat (Title,"]");
+		if(!AddNumPage){
+			strcat (Title," ");
+		}
+	} 
+	if(AddNumPage){
+		strcat (Title,"[");
+		strcat (Title,sNumPage);
+		strcat (Title,"] ");
+	}
+	strcat(Title,TTitle);
+	free(TTitle);
+	free(Time);
 	printf("start thread %d\n",ThreadNum );
 	_WaitForSingleObject(MutexNumGallery);
 	GalleryNum++;
@@ -873,33 +919,26 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 		Page.mem[Page.size]='\0';
 		//printf("%s\n", Page.mem);
 		//GetLink(Page.mem,"><img id=\"img\" src=\"","\" style=",&End,&LinkImg);
-		if (GetLink(Page.mem,"><img id=\"img\" src=\"","\" style=",&End,&LinkImg)){
+		if(BestQuality && strstr(Page.mem,"\">Download original")){
+			if (GetLinkReverse(Page.mem,"class=\"mr\" /> <a href=\"","\">Download original",NULL,&LinkImg)){
 			printf("Error GetLink LinkImg\n");
 			goto cont3;
+			}
+			End=Page.mem;
+		} else {
+			if (GetLink(Page.mem,"><img id=\"img\" src=\"","\" style=",&End,&LinkImg)){
+			printf("Error GetLink LinkImg\n");
+			goto cont3;
+			}
 		}
-		//printf("Link Img: %s\n",LinkIm );
+		//printf("Link Img: %s\n",LinkImg );
 		LinkImg=ConvertLink(LinkImg);
 		if (LinkImg==NULL){
 			printf("Error ConvertLink");
 			goto cont3;
 		}
-		Ext=fromUTF8toUTF16(strrchr(LinkImg,'.'));
-		Cont=swprintf(WNameImg,L"%s\\%0*d%s",WTitle,g,i,Ext);
-		free(Ext);
-		if (Cont<0){
-			printf("Error sprintf\n");
-			continue;
-		}	
-		//if ((FileImg=fopen(NameImg,"r"))){
-		if ((FileImg=_wfopen(WNameImg,L"r"))){
-			printf("%d Exist ",i);
-			goto cont2;
-		}
-		//FileImg=fopen(NameImg,"wb");
-		if ((FileImg=_wfopen(WNameImg,L"wb"))==NULL){
-			perror("fopen");
-			goto cont3;
-		}
+		/***************
+		*********/
 		//FileImg=fopen(NameImg,"wb");
 		curl_easy_setopt(CurlGal,CURLOPT_URL,LinkImg);
 		/*
@@ -907,8 +946,9 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 		WImgData.f=FileImg;
 		curl_easy_setopt(CurlGal, CURLOPT_WRITEDATA , &WImgData);
 		*/
+		/**
 		curl_easy_setopt(CurlGal, CURLOPT_WRITEDATA , FileImg);
-
+		**/
 		Cont=0;
 	try2:
 		if(Verbose && NumThread==1){
@@ -919,29 +959,59 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 			fprintf(stderr, "thread %d curl_easy_perform() 3 failed: %s\n",
 				    ThreadNum,curl_easy_strerror(res));
 			if(res==CURLE_OPERATION_TIMEDOUT){
-				fseek(FileImg,0, SEEK_SET);	
+				//fseek(FileImg,0, SEEK_SET);	
 			} 
 			Cont++;
 			if (Cont>MaxTry){
-				printf("Skip Page:%d\nLinkImg: %s\n",i,LinkImg);
+				fprintf(stderr,"Skip Page:%d\nLinkImg: %s\n",i,LinkImg);
 				goto cont2;
 			} else {
 				goto try2;
 			}
 		}
+		ImgData.mem[ImgData.size]='\0';
+		if(Page.mem==End){
+			Ext=fromUTF8toUTF16( FindFormat(ImgData));
+		} else {
+			Ext=fromUTF8toUTF16(strrchr(LinkImg,'.'));
+		}
+		Cont=swprintf(WNameImg,L"%s\\%0*d%s",WTitle,g,i,Ext);
+		free(Ext);
+		if (Cont<0){
+			printf("Error sprintf\n");
+			continue;
+		}	
+		//if ((FileImg=fopen(NameImg,"r"))){
+		/***
+		if ((FileImg=_wfopen(WNameImg,L"r"))){
+			printf("%d Exist ",i);
+			goto cont2;
+		}
+		****/
+		//FileImg=fopen(NameImg,"wb");
+		if ((FileImg=_wfopen(WNameImg,L"wb"))==NULL){
+			perror("fopen");
+			goto cont3;
+		}
+		if (fwrite(ImgData.mem,ImgData.size,1,FileImg)!=1){
+			perror("Fwrite");
+			fclose(FileImg);
+			goto cont2;
+		}
+		fclose(FileImg);
+		//printf("%X__%X__%X__%X__\n",ImgData.mem[0],ImgData.mem[1],ImgData.mem[2],ImgData.mem[3]);
 		if (Verbose==1){
 			printf("Save %s %0*d/%d   \n",Title,g,i,NumPage);
 		}
 	cont2:
-		fclose(FileImg);
 		if (res != CURLE_OK){
-			DeleteFileW(WNameImg);
+			//DeleteFileW(WNameImg);
 			//DeleteFile(NameImg);
 		}
 	cont3:
 	//char *GetNextPage(int *i,char * End,int NumPage,char * LinkPage,CURL * curl,wchar_t *WTitle)
 		//printf("Before %p\n",(*HP).mem);
-		LinkNextPage=GetNextPage(&i,End,NumPage,LinkPage,curl,WTitle,&Page,NumImg,&((*HP).mem),&LastPage);
+		LinkNextPage=GetNextPage(&i,Page.mem,NumPage,LinkPage,curl,WTitle,&Page,NumImg,&((*HP).mem),&LastPage);
 		/*
 		printf("next i:%d\n",i);
 		printf("next link:%s\n",LinkNextPage);
@@ -956,6 +1026,8 @@ void  GetGallery(struct Mem *HP,char *LinkPage ,CURL * curl,
 
 		//printf("SecSleep %lu\n",SecSleep);
 		//	printf("%p\n", Mutex);
+		ImgData.mem=(char*)realloc(ImgData.mem,1);
+		ImgData.size=0;
 
 		Sleep(SecSleep);
 
@@ -1373,6 +1445,7 @@ int main (int argc,char **argv)
 	char *Search=NULL;
 	char *Pname;
 	char *sk=NULL;
+	//uint8_t BestQuality=0;
 	//uint8_t AddTime=0;
 	//char *Tag="1100000000";
 	char *Tag="1111111111";
@@ -1417,12 +1490,14 @@ int main (int argc,char **argv)
 		{"multi-thread",required_argument,NULL,'T'},
 		{"verbose",no_argument,NULL,'v'},
 		{"only-proxy",no_argument,NULL,'o'},
-		{"quiet",no_argument,NULL,'q'},
+		{"quiet",no_argument,NULL,'Q'},
 		{"exclude",required_argument,NULL,'x'},
 		{"max-page",required_argument,NULL,'N'},
 		{"list",no_argument,NULL,'L'},
-		{"time-out",required_argument,NULL,'O'},
-		{"add-time",no_argument,NULL,'A'}
+		{"timeout",required_argument,NULL,'O'},
+		{"add-time",no_argument,NULL,'A'},
+		{"add-num-page",no_argument,NULL,'G'},
+		{"best-quality",no_argument,NULL,'q'}
 
 	};
 	Cargc=argc;
@@ -1513,10 +1588,16 @@ int main (int argc,char **argv)
 	//while((opt = getopt(argc,argv,"c:m:p::l:f:d:"))!=-1){
 	//printf("ciao %d \n", Cargc);
 	while ((opt=getopt_long(Cargc,Cargv,
-		               "c:m:p::l:f:d:s:n:hr::k:a:t:P::T:voqx:N:LO:A",
+		               "c:m:p::l:f:d:s:n:hr::k:a:t:P::T:voQx:N:LO:AGq",
 		               long_opt,&optindex))!=-1){
 	//	printf("%c\n",opt );
 		switch(opt) {
+		case 'q':
+			BestQuality=1;
+			break;
+		case 'G':
+			AddNumPage=1;
+			break;
 		case 'A':
 			AddTime=1;
 			break;
@@ -1526,7 +1607,7 @@ int main (int argc,char **argv)
 		case 'x':
 			SepareTag(&ExcludeTag,optarg,&NumExcludeTag);
 			break;
-		case 'q':
+		case 'Q':
 			Verbose=0;
 			break;
 		case 'O':
@@ -1600,7 +1681,7 @@ int main (int argc,char **argv)
 		*/
 			printf("page\t\tp\ndirectory\td\ncookie\t\tc\nmax-try\t\tm\nsleep\t\tl\nskip\t\tk\nfile\t\tf\nmin-page\tn\nmax-page\tN\nhelp\t\th\nrecursive\tr\n");
 			printf("search\t\ts\ntag\t\tt\nstart-page\ta\nproxy\t\tP\nmulti-thre\tT\nverbose\t\tv\nonly-prox\to\nquiet\t\tq\nexclude\t\tx\nlist\t\tL\n");
-			printf("time-out\tO\n");
+			printf("timeout\t\tO\nadd-time\tA\nadd-num-page\tG\tbest-quality\tq");
 			//return 0;
 			break;
 		case 'n':
